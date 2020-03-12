@@ -129,8 +129,10 @@ if __name__ == '__main__':
     available = cflib.crtp.scan_interfaces()
     print('Crazyflies found:')
     for i in available:
-        print(i[0])
-
+        print(i[1])
+        print(i)
+    print(available)
+    '''
     if len(available) > 0:
         le = LoggingExample(available[0][0])
     else:
@@ -139,5 +141,7 @@ if __name__ == '__main__':
     # The Crazyflie lib doesn't contain anything to keep the application alive,
     # so this is where your application should do something. In our case we
     # are just waiting until we are disconnected.
+    
     while le.is_connected:
         time.sleep(1)
+    '''

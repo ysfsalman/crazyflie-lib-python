@@ -40,23 +40,29 @@ from cflib.crazyflie.log import LogConfig
 from cflib.crazyflie.syncCrazyflie import SyncCrazyflie
 from cflib.crazyflie.syncLogger import SyncLogger
 
+
+# additional import
+import math
+from cfSocket import cfSocket as cs
+
+# add communication object
+MatlabCom = cs()
+
+
+# estimated drone position and yaw to pass as global variable
+x = 0
+y = 0
+z = 0
+yaw = 0
+
 # URI to the Crazyflie to connect to
 uri = 'radio://0/80/2M'
-
-# Change the sequence according to your setup
-#             x    y    z  YAW
-sequence = [
-    (2.5, 2.5, 1.2, 0),
-    (1.5, 2.5, 1.2, 0),
-    (2.5, 2.0, 1.2, 0),
-    (3.5, 2.5, 1.2, 0),
-    (2.5, 3.0, 1.2, 0),
-    (2.5, 2.5, 1.2, 0),
-    (2.5, 2.5, 0.4, 0),
-]
-
+#uri  = 'usb://0'
 
 def wait_for_position_estimator(scf):
+    """
+    use this function to acquire initial position and yaw
+    """
     print('Waiting for estimator to find position...')
 
     log_config = LogConfig(name='Kalman Variance', period_in_ms=500)
@@ -69,11 +75,10 @@ def wait_for_position_estimator(scf):
     var_z_history = [1000] * 10
 
     threshold = 0.001
-
+    
     with SyncLogger(scf, log_config) as logger:
-        for log_entry in logger:
+        for log_entry in logger:           
             data = log_entry[1]
-
             var_x_history.append(data['kalman.varPX'])
             var_x_history.pop(0)
             var_y_history.append(data['kalman.varPY'])
@@ -87,8 +92,7 @@ def wait_for_position_estimator(scf):
             max_y = max(var_y_history)
             min_z = min(var_z_history)
             max_z = max(var_z_history)
-
-            # print("{} {} {}".
+            #print("{} {} {}".
             #       format(max_x - min_x, max_y - min_y, max_z - min_z))
 
             if (max_x - min_x) < threshold and (
@@ -107,18 +111,26 @@ def reset_estimator(scf):
 
 
 def position_callback(timestamp, data, logconf):
+    # set to global to be sent to server (if needed)
+    global x, y, z, yaw
+
     x = data['kalman.stateX']
     y = data['kalman.stateY']
     z = data['kalman.stateZ']
-    print('pos: ({}, {}, {})'.format(x, y, z))
-
-
+    yaw = data['stabilizer.yaw']
+    MatlabCom.sendDronePose([int(i*100) for i in [x,y,z,yaw]])
+    print('pos: ({}, {}, {}) yaw: ({})'.format(x, y, z, yaw))
+    
 def start_position_printing(scf):
-    log_conf = LogConfig(name='Position', period_in_ms=500)
+    """
+    This function will also used to initialize initial position
+    """
+    log_conf = LogConfig(name='Position', period_in_ms=50)#500
     log_conf.add_variable('kalman.stateX', 'float')
     log_conf.add_variable('kalman.stateY', 'float')
     log_conf.add_variable('kalman.stateZ', 'float')
-
+    log_conf.add_variable('stabilizer.yaw', 'float')    # additional
+    #print('pos: ({}, {}, {}) yaw: ({})'.format(x, y, z, yaw))
     scf.cf.log.add_config(log_conf)
     log_conf.data_received_cb.add_callback(position_callback)
     log_conf.start()
@@ -126,20 +138,65 @@ def start_position_printing(scf):
 
 def run_sequence(scf, sequence):
     cf = scf.cf
-
+    
     for position in sequence:
         print('Setting position {}'.format(position))
         for i in range(50):
-            cf.commander.send_position_setpoint(position[0],
-                                                position[1],
-                                                position[2],
-                                                position[3])
-            time.sleep(0.1)
+            fly(cf,position)
 
     cf.commander.send_stop_setpoint()
     # Make sure that the last packet leaves before the link is closed
     # since the message queue is not flushed before closing
     time.sleep(0.1)
+
+def fly(cf, position):
+    cf.commander.send_position_setpoint(position[0],
+                                        position[1],
+                                        position[2],
+                                        position[3])
+    time.sleep(0.1)
+
+def init_fly(scf):
+    #to be able to fly stably in the beginning, the drone need to increase height only (hence no any roll,yaw,pitch)
+    cf = scf.cf
+    x_init, y_init, z_init, yaw_init = [x, y, z, yaw]
+    print('pos_init: ({}, {}, {}) yaw: ({})'.format(x_init, y_init, z_init, yaw_init))
+    
+    for i in range(10):
+	    fly(cf,[x_init, y_init, z_init+0.5, yaw_init])    
+    
+
+
+'''
+def path(ball_pos):
+    # get ball pos
+    xb, yb = from somewhere
+        
+    # get current loc, use global x, y
+    
+    # get distance
+    dx = (x-xb)
+    dy = (y-yb)
+    vec = (dx**2+ dy**2)**0.5
+
+    # if distance < radius : break
+    if isRange::
+        break
+    
+    # get target loc = vector * max ; max = tuned
+    set_point = vec*max
+    # get orientation from atan dist x / dist y
+    deg = degree(atan(dy/dx))
+'''
+
+''' 
+def isRange:
+    if vec<R && deg>ddeg && deg<ddeg: 
+        return True
+    else 
+        return False
+
+'''
 
 
 if __name__ == '__main__':
@@ -147,5 +204,16 @@ if __name__ == '__main__':
 
     with SyncCrazyflie(uri, cf=Crazyflie(rw_cache='./cache')) as scf:
         reset_estimator(scf)
-        # start_position_printing(scf)
-        run_sequence(scf, sequence)
+        start_position_printing(scf)
+        #print('pos:{},{},{}, yaw:{}'.format(x_init,y_init,z_init,yaw_init))
+        time.sleep(10)
+        init_fly(scf)
+        
+
+'''
+        # Path planning goes here
+        #sequence = [[x_init,y_init,z_init+1, yaw_init],
+                    [x_init,y_init,z_init  , yaw_init],
+                    [x_init,y_init,z_init+1, yaw_init]]
+        #run_sequence(scf, sequence)
+'''
